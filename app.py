@@ -1,56 +1,69 @@
 import json
-import streamlit as st
-import tensorflow as tf
-from tensorflow.keras.preprocessing import image
-from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 import numpy as np
+from PIL import Image
+import gradio as gr
 
-# ✅ Cached model loading
-@st.cache_resource
-def load_model():
-    return tf.keras.models.load_model('tomato_disease_model.h5')
+# Global variables to cache the model so it only loads ONCE when analyzed
+MODEL = None
+INDEX_TO_CLASS = None
 
-# ✅ Load class mapping from training (not hardcoded)
-@st.cache_resource
-def load_class_mapping():
-    with open('class_indices.json') as f:
-        class_indices = json.load(f)
-    return {v: k for k, v in class_indices.items()}  # {0: 'class_name', ...}
+def predict_tomato_disease(pil_image):
+    global MODEL, INDEX_TO_CLASS
+    
+    if pil_image is None:
+        return None
+    
+    # ── LAZY LOADING TENSORFLOW ──
+    # Avoids sluggish app loading times by only importing when an image is sent
+    if MODEL is None:
+        import tensorflow as tf
+        from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+        
+        MODEL = tf.keras.models.load_model('tomato_disease_model.h5')
+        with open('class_indices.json') as f:
+            class_indices = json.load(f)
+        INDEX_TO_CLASS = {v: k for k, v in class_indices.items()}
+    else:
+        from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 
-model = load_model()
-index_to_class = load_class_mapping()
+    # ── AI PREPROCESSING & INFERENCE ──
+    img_resized = pil_image.resize((224, 224))
+    img_array = np.array(img_resized, dtype=np.float32)
+    img_array = preprocess_input(img_array)
+    img_array = np.expand_dims(img_array, axis=0)
 
-st.title('🌱 Tomato Disease Detector')
-st.write('Upload any tomato leaf → Instant diagnosis')
+    prediction = MODEL.predict(img_array, verbose=0)[0]
+    
+    # Format cleanly for Gradio's minimalist dashboard bars
+    results = {}
+    for idx, confidence in enumerate(prediction):
+        class_name = INDEX_TO_CLASS[idx].replace('_', ' ').title()
+        results[class_name] = float(confidence)
+        
+    return results
 
-uploaded = st.file_uploader('Choose tomato leaf photo', type=['jpg', 'jpeg', 'png'])
+# ── MINIMAL, SCIENTIFIC SAAS UI ──
+# Changed gr.themes.Dark to gr.themes.Default to fix the AttributeError
+with gr.Blocks(theme=gr.themes.Default(primary_hue="green", font=["Exo 2", "sans-serif"])) as demo:
+    gr.Markdown("""
+    # 🍅 AI Tomato Disease Detector
+    *Professional-grade deep learning diagnostic utility powered by MobileNetV2.*
+    """)
+    
+    with gr.Row():
+        with gr.Column(scale=1):
+            # Native clipboard pasting and drag-and-drop support out of the box
+            input_img = gr.Image(type="pil", label="Upload Leaf Sample (Drag & Drop or Ctrl+V to Paste)")
+            with gr.Row():
+                clear_btn = gr.Button("🔄 Reset Dashboard", variant="secondary")
+                submit_btn = gr.Button("🔬 Analyse Tissue", variant="primary")
+                
+        with gr.Column(scale=1):
+            output_labels = gr.Label(num_top_classes=3, label="Probability Distribution Analysis")
 
-if uploaded:
-    # ✅ Force RGB, correct target size
-    img = image.load_img(uploaded, target_size=(224, 224), color_mode='rgb')
-    img_array = image.img_to_array(img)
-    img_array = preprocess_input(img_array)       # ✅ Correct for MobileNetV2
-    img_array = np.expand_dims(img_array, axis=0) # shape: (1, 224, 224, 3)
+    # Bind actions
+    submit_btn.click(fn=predict_tomato_disease, inputs=input_img, outputs=output_labels)
+    clear_btn.click(fn=lambda: (None, None), inputs=None, outputs=[input_img, output_labels])
 
-    # Predict
-    prediction = model.predict(img_array)
-    predicted_idx = np.argmax(prediction[0])
-    predicted_class = index_to_class[predicted_idx]  # ✅ Uses saved mapping
-    confidence = np.max(prediction[0]) * 100
-
-    # Display
-    st.image(uploaded, caption='Uploaded Leaf', width=300)
-    st.success(f"**Diagnosis**: {predicted_class}")
-    st.info(f"**Confidence**: {confidence:.1f}%")
-    st.progress(confidence / 100)
-
-    # ✅ Bonus: show top 3 predictions for transparency
-    st.write("**Top 3 predictions:**")
-    top3_idx = np.argsort(prediction[0])[::-1][:3]
-    for idx in top3_idx:
-        st.write(f"- {index_to_class[idx]}: {prediction[0][idx]*100:.1f}%")
-
-if st.button('ℹ️ About Model'):
-    st.write("✅ MobileNetV2 Transfer Learning")
-    st.write(f"✅ {len(index_to_class)} Tomato disease classes")
-    st.write("✅ ~91% Validation Accuracy")
+if __name__ == "__main__":
+    demo.launch()
