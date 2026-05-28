@@ -1,0 +1,8 @@
+tensorflow
+fastapi
+uvicorn
+python-multipart
+numpy
+pillow
+streamlit
+requests
