@@ -1,82 +1,37 @@
-import json
-import numpy as np
-from PIL import Image
+import io
+import requests
 import gradio as gr
-import tensorflow as tf
-from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
+from PIL import Image
 
-print("🚀 Loading AI model... Please wait")
+API_BASE_URL = "http://127.0.0.1:8000/predict"
 
-# =========================
-# PRELOAD MODEL AT STARTUP
-# =========================
-
-MODEL = tf.keras.models.load_model(
-    'backend/models/tomato_disease_model.h5'
-)
-
-with open('backend/models/class_indices.json') as f:
-    class_indices = json.load(f)
-
-INDEX_TO_CLASS = {
-    v: k for k, v in class_indices.items()
-}
-
-print("✅ AI model loaded successfully!")
-
-# =========================
-# PREDICTION FUNCTION
-# =========================
-
-def predict_tomato_disease(pil_image):
-
+def send_image_to_backend(pil_image, model_choice):
     if pil_image is None:
         return None
 
-    # Resize image
-    img_resized = pil_image.resize((224, 224))
+    # Map radio option text to backend router names
+    model_type = "mobilenet" if "MobileNet" in model_choice else "efficientnet"
+    api_url = f"{API_BASE_URL}/{model_type}"
 
-    # Convert to numpy
-    img_array = np.array(
-        img_resized,
-        dtype=np.float32
-    )
+    buffer = io.BytesIO()
+    pil_image.save(buffer, format="JPEG")
+    buffer.seek(0)
 
-    # MobileNetV2 preprocessing
-    img_array = preprocess_input(img_array)
+    try:
+        files = {"file": ("sample.jpg", buffer, "image/jpeg")}
+        response = requests.post(api_url, files=files, timeout=30)
 
-    # Add batch dimension
-    img_array = np.expand_dims(
-        img_array,
-        axis=0
-    )
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return {f"⚠️ Error: Server returned status {response.status_code}": 1.0}
 
-    # Prediction
-    prediction = MODEL.predict(
-        img_array,
-        verbose=0
-    )[0]
+    except requests.exceptions.RequestException as error:
+        return {f"❌ Failed to reach API. Is backend running?\n{str(error)}": 1.0}
 
-    # Format output
-    results = {}
-
-    for idx, confidence in enumerate(prediction):
-
-        class_name = INDEX_TO_CLASS[idx]
-
-        class_name = (
-            class_name
-            .replace('_', ' ')
-            .title()
-        )
-
-        results[class_name] = float(confidence)
-
-    return results
-
-# =========================
-# GRADIO UI
-# =========================
+# ==========================================
+# GRADIO UI DESIGN (MobileNet Theme Base)
+# ==========================================
 
 with gr.Blocks(
     theme=gr.themes.Default(
@@ -88,61 +43,52 @@ with gr.Blocks(
     gr.Markdown("""
     # 🍅 AI Tomato Disease Detector
     
-    Professional-grade deep learning diagnostic utility powered by MobileNetV2.
+    Professional-grade deep learning diagnostic utility powered by dual-core architectures.
     
-    ⚡ AI model preloaded for instant predictions.
+    ⚡ *Select your architecture below to process image diagnostics via the unified API backend.*
     """)
 
     with gr.Row():
 
-        # LEFT PANEL
         with gr.Column(scale=1):
-
             input_img = gr.Image(
                 type="pil",
                 label="Upload Leaf Sample"
             )
+            
+            model_selector = gr.Radio(
+                choices=["MobileNetV2 Core (Fast & Lightweight)", "EfficientNetB0 Core (High Accuracy Fine-Tuned)"],
+                value="MobileNetV2 Core (Fast & Lightweight)",
+                label="Select AI Architecture Core"
+            )
 
             with gr.Row():
-
                 clear_btn = gr.Button(
                     "🔄 Reset Dashboard",
                     variant="secondary"
                 )
-
                 submit_btn = gr.Button(
                     "🔬 Analyse Tissue",
                     variant="primary"
                 )
 
-        # RIGHT PANEL
         with gr.Column(scale=1):
-
             output_labels = gr.Label(
                 num_top_classes=3,
                 label="Probability Distribution Analysis"
             )
 
-    # =========================
-    # BUTTON ACTIONS
-    # =========================
-
     submit_btn.click(
-        fn=predict_tomato_disease,
-        inputs=input_img,
+        fn=send_image_to_backend,
+        inputs=[input_img, model_selector],
         outputs=output_labels
     )
 
     clear_btn.click(
-        fn=lambda: (None, None),
+        fn=lambda: (None, "MobileNetV2 Core (Fast & Lightweight)", None),
         inputs=None,
-        outputs=[input_img, output_labels]
+        outputs=[input_img, model_selector, output_labels]
     )
 
-# =========================
-# LAUNCH APP
-# =========================
-
 if __name__ == "__main__":
-
-    demo.launch()
+    demo.launch(server_name="127.0.0.1", server_port=7860)

@@ -1,0 +1,21 @@
+PLANT-DISEASE/
+│
+├── backend/
+│   ├── models/
+│   │   ├── efficientnet/
+│   │   │   ├── class_indices.json
+│   │   │   └── new_best_model.keras
+│   │   └── mobilenet/
+│   │       ├── class_indices.json
+│   │       └── tomato_disease_model.keras
+│   │
+│   ├── app.py
+│   ├── config.py
+│   ├── model_loader.py
+│   └── predict.py
+│
+├── frontend/
+│   └── ui.py
+│
+├── temp/            
+└── requirements.txt
